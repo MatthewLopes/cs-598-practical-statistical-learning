@@ -1,0 +1,340 @@
+---
+title: "Coding Assignment 4 (Part II)"
+date: "Fall 2022"
+output:
+  html_notebook:
+    theme: readable
+    toc: TRUE
+    toc_float: TRUE
+---
+
+
+## The Baum-Welch  algorihtm
+
+The Baum-Welch  Algorihtm is the EM algorithm for HMM. You should prepare a function `BW.onestep` to perform the E-step and M-step, and then iteratively call that function in `myBW`.
+
+**Note that We do not update w.**
+
+```{r eval=FALSE}
+myBW = function(x, para, n.iter = 100){
+  # Input:
+  # x: T-by-1 observation sequence
+  # para: initial parameter value
+  # Output updated para value (A and B; we do not update w)
+  
+  # for(i in 1:n.iter){
+  
+  for(i in 1:n.iter){
+    para = BW.onestep(x, para)
+  }
+  return(para)
+}
+```
+
+Your function `BW.onestep`, in which we operate the E-step and M-step for one iteration, should look as follows. 
+
+```{r eval=FALSE}
+BW.onestep = function(x, para){
+  # Input: 
+  # x: T-by-1 observation sequence
+  # para: mx, mz, and current para values for
+  #    A: initial estimate for mz-by-mz transition matrix
+  #    B: initial estimate for mz-by-mx emission matrix
+  #    w: initial estimate for mz-by-1 initial distribution over Z_1
+  # Output the updated parameters after one iteration
+  # We DO NOT update the initial distribution w
+  
+  T = length(x)
+  mz = para$mz
+  mx = para$mx
+  A = para$A
+  B = para$B
+  w = para$w
+  alp = forward.prob(x, para)
+  beta = backward.prob(x, para)
+  ##
+  # print(dim(beta))
+  # print(dim(alp))
+  ##
+  myGamma = array(0, dim=c(mz, mz, T-1))
+  
+  # print(alp)
+  # print(A)
+  # print(beta)
+  # print(alp)
+  #######################################
+  ## YOUR CODE: 
+  ## Compute gamma_t(i,j) P(Z[t] = i, Z[t+1]=j), 
+  ## for t=1:T-1, i=1:mz, j=1:mz, 
+  ## which are stored in an array, myGamma
+  #######################################
+  
+  for(t in 1:(T-1)){
+    for(i in 1:mz){
+      for(j in 1:mz){ ##HOW TO account for T and T+1 for beta and alpha
+        myGamma[i,j,t] = alp[t,i]*A[i,j]*B[j,x[t+1]]*beta[t+1,j]
+      }
+    }
+  }
+  
+  #mz by mz
+  # getting the gamma plus values needed for A equation on slide 14
+  
+  gamma_plus = matrix(0,mz,mz)
+
+  for (i in 1:(T-1)){
+    gamma_plus = gamma_plus + myGamma[,,i]
+  }
+   
+
+  # M-step for parameter A
+  #######################################
+  ## YOUR CODE: 
+  ## A = ....
+  #######################################
+  A = gamma_plus/rowSums(gamma_plus) 
+ 
+
+  # M-step for parameter B
+  #######################################
+  ## YOUR CODE: 
+  ## B = ....
+  #######################################
+  
+  
+  
+  ## getting the gamma is from the equation on slide 12
+  
+  yt_i = array(0,dim=c(T,mz))
+  for(k in 1:(T-1)){
+    yt_i[k,] = as.array(rowSums(myGamma[,,k]))
+  }
+  
+  yt_i[T,] = as.array(colSums(myGamma[,,(T-1)]))  #SUM of yt-1(j,i)
+  
+
+  
+  B = matrix(0,mz,mx)
+  
+  for(l in 1:mx){
+    for (i in 1:mz){
+      numerator = 0
+      
+      # if x[t] is equal to l, add to the numerator sum
+      
+      for(t in 1:T){
+        if(x[t]==l){
+          numerator = numerator + yt_i[t,i]
+        }
+      }
+      
+      #sum the yt(i) over all T's
+      denom = sum(yt_i[,i])
+   
+      #get the B value from numerator over denominator
+      B[i,l] = numerator/denom 
+    }
+  }
+  
+  para$A = A
+  para$B = B
+  # print(para)
+  return(para)
+}
+```
+
+You can compute the forward and backward probabilities using the following functions.
+
+```{r eval=FALSE}
+forward.prob = function(x, para){
+  # Output the forward probability matrix alp 
+  # alp: T by mz, (t, i) entry = P(x_{1:t}, Z_t = i)
+  T = length(x)
+  mz = para$mz
+  A = para$A
+  B = para$B
+  w = para$w
+  alp = matrix(0, T, mz)
+  
+  # fill in the first row of alp
+  alp[1, ] = w * B[, x[1]]
+  # Recursively compute the remaining rows of alp
+  for(t in 2:T){
+    tmp = alp[t-1, ] %*% A
+    alp[t, ] = tmp * B[, x[t]]
+    }
+  return(alp)
+}
+
+backward.prob = function(x, para){
+  # Output the backward probability matrix beta
+  # beta: T by mz, (t, i) entry = P(x_{1:t}, Z_t = i)
+  T = length(x)
+  mz = para$mz
+  A = para$A
+  B = para$B
+  w = para$w
+  beta = matrix(1, T, mz)
+
+  # The last row of beta is all 1.
+  # Recursively compute the previous rows of beta
+  for(t in (T-1):1){
+    tmp = as.matrix(beta[t+1, ] * B[, x[t+1]])  # make tmp a column vector
+    beta[t, ] = t(A %*% tmp)
+    }
+  return(beta)
+}
+```
+
+## The Viterbi algorihtm
+
+The Viterbi algorihtm returns the most probable latent sequence given the data and the MLE of parameters. 
+
+```{r eval=FALSE}
+myViterbi = function(x, para){
+  # Output: most likely sequence of Z (T-by-1)
+  T = length(x)
+  mz = para$mz
+  A = para$A
+  B = para$B
+  w = para$w
+  log.A = log(A)
+  log.w = log(w)
+  log.B = log(B)
+  
+  # Compute delta (in log-scale)
+  delta = matrix(0, T, mz) 
+  # fill in the first row of delta
+  delta[1, ] = log.w + log.B[, x[1]]
+  
+  #######################################
+  ## YOUR CODE: 
+  ## Recursively compute the remaining rows of delta
+  #######################################
+  
+
+  
+  for(t in 2:T){
+    
+    #finding the max index j for this equation
+    j_max = -Inf
+    j_index = 1
+    
+    for(i in 1:mz){
+      for(j in 1:mz){
+        if ( delta[(t-1),j] + log(A[j,i]) > j_max){
+          j_max = delta[(t-1),j] + log(A[j,i]) 
+          j_index = j
+        }
+      }
+      delta[t,i] = j_max + log.B[i, x[t]]
+    }
+  }
+  
+  # Compute the most prob sequence Z
+  Z = rep(0, T)
+  # start with the last entry of Z
+  Z[T] = which.max(delta[T, ])
+  
+  #######################################
+  ## YOUR CODE: 
+  ## Recursively compute the remaining entries of Z
+  #######################################
+  
+  for(t in (T-1):1){
+    Z[t]=which.max(delta[t, ] + log.A[,Z[(t+1)]])
+  }
+  
+  return(Z)
+}
+```
+
+## Test your function
+
+### Your result
+Try your code on the data provided on Campuswire. You can (i) use the initial values specified below or (ii) use your own initial values. For the latter, remember to set the seed as the last four digits of your UIN. 
+
+```{r, eval = FALSE}
+data = scan("./data/coding4_part2_data.txt")
+
+mz = 2
+mx = 3
+ini.w = rep(1, mz); ini.w = ini.w / sum(ini.w)
+ini.A = matrix(1, 2, 2); ini.A = ini.A / rowSums(ini.A)
+ini.B = matrix(1:6, 2, 3); ini.B = ini.B / rowSums(ini.B)
+ini.para = list(mz = 2, mx = 3, w = ini.w,
+                A = ini.A, B = ini.B)
+
+set.seed(1852)
+myout = myBW(data, ini.para, n.iter = 100)
+```
+
+
+
+### Result from `HMM`
+Call R package `HMM`
+
+```{r}
+library(HMM)
+hmm0 =initHMM(c("A", "B"), c(1, 2, 3),
+              startProbs = ini.w,
+              transProbs = ini.A, 
+              emissionProbs = ini.B)
+Rout = baumWelch(hmm0, data, maxIterations=100, delta=1E-9, pseudoCount=0)
+
+Rout.Z = viterbi(Rout$hmm, data)
+```
+
+```{r}
+myout.Z = myViterbi(data, myout)
+
+# mz = 2
+# mx = 3
+# w = Rout$hmm$startProbs
+# A = Rout$hmm$transProbs
+# B = Rout$hmm$emissionProbs
+
+# 
+# myout.Z = myViterbi(data, list(mz = 2,mx = 3,w = Rout$hmm$startProbs,A = Rout$hmm$transProbs,B = Rout$hmm$emissionProbs))
+myout.Z[myout.Z==1] = 'A'
+myout.Z[myout.Z==2] = 'B'
+```
+
+
+### Compare two results
+
+```{r}
+options(digits=8)
+options()$digits
+```
+
+- Compare estimates for transition prob matrix A
+```{r}
+myout$A
+Rout$hmm$transProbs
+```
+
+- Compare estimates for emission prob matrix B
+```{r}
+myout$B
+Rout$hmm$emissionProbs
+```
+
+- Compare the most probable Z sequence.
+```{r}
+cbind(Rout.Z, myout.Z)[c(1:10, 180:200), ]
+sum(Rout.Z != myout.Z)
+```
+
+## Tips and suggestions
+
+- When testing your code, you can run your EM algorithm with one iteration and then compare your estimates for (A, B) with the ones from `HMM`.
+
+- In case the estimates for (A, B) from your EM code don’t match the ones from HMM, you can use the estimates for (A, B) from HMM as the input for your Viterbi algorithm, so you won’t be penalized twice for any error in your EM code. 
+
+- Many calculation in HMM involves products of series of probabilities, which, consequently, are quite small. Sometimes, they are so small that R would treat them as zero. This would create a problem for the Viterbi algorithm where we need to decide which one is larger than the other one; if R truncates them to be zero, we cannot make that comparison. This is why we suggest to compute those probabilities in log-scale in your Viterbi algorithm.
+
+
+
+
+

@@ -1,0 +1,285 @@
+---
+title: "(PSL) Coding Assignment 4 (Part I)"
+date: "Fall 2022"
+output:
+  pdf_document:
+    toc: yes
+  html_notebook:
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+> Implement the EM algorithm for a $p$-dimensional Gaussian mixture model with $G$ components:
+
+$$
+p(x \mid p_{1:G}, \mu_{1:G}, \Sigma) = \sum_{k=1}^G p_k \cdot N(x; \mu_k, \Sigma).
+$$
+
+## Prepare your function
+
+You should write a function to perform the E-step, a function to perform the M-step, and then iteratively call these two functions in `myEM`. 
+
+You also need to prepare
+a function to evaluate the loglikelihood; call that function after you finish the EM iterations. 
+
+
+```{r}
+
+Multivariate_Gauss_PDF <- function(x,mu,sigma){
+  x = as.matrix(x)
+  k = length(mu)
+  constant=(2*pi)^(-k/2)*(det(sigma)^(-.5))
+  x_minus_mu = t(x-mu)
+  constant*exp(-.5*t(x_minus_mu)%*%solve(sigma)%*%(x_minus_mu))
+}
+Estep <- function(data, G, para){
+  # Your Code
+  # Return the n-by-G probability matrix
+    solution = matrix(0, nrow(data), G)
+    for(i in 1:nrow(data)){
+      for(j in 1:G){
+        solution[i,j] =  para$prob[j]*Multivariate_Gauss_PDF(data[i,],para$mean[,j],para$Sigma );
+      }
+      denom = 0
+      for(j in 1:G) {
+        denom = denom + solution[i,j]
+      }
+      for(j in 1:G){
+        solution[i,j] = solution[i,j] / denom
+      }
+    }
+    return(solution)
+  }
+
+Mstep <- function(data, G, para, post.prob){ 
+  # Your Code
+  # Return the updated parameters
+  n = nrow(data)
+  
+  gamma_plus = colSums(post.prob)
+  for(k in 1:G) {
+    para$mean[,k] = t(data) %*% post.prob[,k]  / gamma_plus[k]
+  }
+  
+  S = matrix(0,dim(data)[2],dim(data)[2])
+  
+  for(i in 1:n) {
+    for(k in 1:G){
+      x =c()
+      mu = c()
+      for (l in 1:dim(data)[2]){
+        x = c(x,data[i,l])
+        mu = c(mu,as.numeric(para$mean[l,k]))
+      }
+      x_minus_mu = (x-mu)
+      S = S + post.prob[i,k] * outer(x_minus_mu, x_minus_mu)
+    }
+  }
+  
+  para$Sigma = S/n
+    
+  para$prob = gamma_plus / n
+  return(para)
+  }
+
+loglik <- function(data, G, para){
+	# compute loglikelihood
+  
+  A = matrix(0,nrow(data),G)
+  for(k in 1:G){
+    A[,k] = para$prob[k]
+    for(i in 1:nrow(data)){
+      A[i,k] = A[i,k] * Multivariate_Gauss_PDF(data[i,],para$mean[,k],para$Sigma)
+    }
+  }
+  tmp = rowSums(A)
+  sum(log(tmp))
+}
+
+myEM <- function(data, itmax, G, para){
+  # itmax: number of of iterations
+  # G:     number of components
+  # para:  list of (prob, mean, Sigma, loglik)
+  
+  for(t in 1:itmax){
+    post.prob <- Estep(data, G, para)
+    para <- Mstep(data, G, para, post.prob)
+  }
+  
+  # update para$loglik   
+  para$loglik <- loglik(data, G, para)
+  
+  return(para)
+}
+```
+
+
+
+## Test your function
+
+
+Test your function on the `faithful` data with $G = 2$ and $G = 3$ with **20** iterations (i.e., `itmax = 20`). The mixture model described above corresponds to `modelName = "EEE"` in `mclust` (you do not need to know why).
+
+
+
+Set the number of printing digits to be eight. The result from your function should agree with the result from `mclust`, up to the speciofied precision level. 
+
+```{r}
+options(digits=8)
+options()$digits
+```
+
+
+### Load data
+
+Load the `faithful` data from R package `mclust`.
+```{r}
+library(mclust)
+faithful<- read.table("data/faithful.dat", header = T)
+print(dim(faithful))
+head(faithful)
+```
+
+
+### Two clusters
+
+Compare the result returned by `myEM` and the one returned by the EM algorithm in `mclust` after 20 iterations.
+
+
+We **initialize** parameters by first randomly assigning the $n$ samples into two groups and then running one iteration of the built-in M-step. 
+
+```{r}
+n <- nrow(faithful)
+G <- 2
+set.seed(1852)  # replace 234 by the last 4-dig of your University ID
+gID <- sample(1:G, n, replace = TRUE)
+Z <- matrix(0, n, G)
+for(k in 1:G)
+  Z[gID == k, k] <- 1 
+ini0 <- mstep(modelName="EEE", faithful , Z)$parameters
+```
+
+Here are the initial values we use for (prob, mean, Sigma).
+
+```{r}
+para0 <- list(prob = ini0$pro, 
+              mean = ini0$mean, 
+              Sigma = ini0$variance$Sigma, 
+              loglik = NULL)
+para0
+```
+
+
+* Output from `myEM`
+
+```{r}
+myEM(data=faithful, itmax=20, G=G, para=para0)
+```
+
+* Output from `mclust`
+```{r}
+Rout <- em(modelName = "EEE", data = faithful,
+           control = emControl(eps=0, tol=0, itmax = 20), 
+           parameters = ini0)
+list(prob = Rout$para$pro, mean = Rout$para$mean, 
+     Sigma = Rout$para$variance$Sigma, 
+     loglik = Rout$loglik)
+```
+
+
+### Three clusters
+
+Similarly, set $G=3$, then compare the result returned by `myEM` and the one returned by the em algorithm from `mclust` after 20 iterations.
+
+
+```{r}
+n <- nrow(faithful)
+G <- 3
+gID <- sample(1:G, n, replace = TRUE)
+Z <- matrix(0, n, G)
+for(k in 1:G)
+  Z[gID == k, k] <- 1 
+ini0 <- mstep(modelName="EEE", faithful , Z)$parameters
+para0 <- list(prob = ini0$pro, 
+              mean = ini0$mean, 
+              Sigma = ini0$variance$Sigma, 
+              loglik = NULL)
+```
+
+
+```{r}
+myEM(data=faithful, itmax=20, G=G, para=para0)
+```
+
+```{r}
+Rout <- em(modelName = "EEE", data = faithful,
+           control = emControl(eps=0, tol=0, itmax = 20), 
+           parameters = ini0)
+list(prob = Rout$para$pro, mean = Rout$para$mean, 
+     Sigma = Rout$para$variance$Sigma, 
+     loglik = Rout$loglik)
+```
+## Derivation
+
+Partial results for the required expressions are given below. 
+
+1. Expression of the marginal (or the so-called incomplete) likelihood function  or its log, which is the objective function we aim to maximize.
+
+
+$$
+\begin{aligned}
+& \prod_{i=1}^n  p(x_i \mid p_{1:G}, \mu_{1:G}, \Sigma) \\
+= & \prod_{i=1}^n  \big[   p_1 N(x_i; \mu_1, \Sigma) + \cdots + p_G N(x_i; \mu_G, \Sigma) \big ]\\
+= & \prod_{i=1}^n  \Big [ p_1  \frac{\exp  ( - \frac{1}{2} (x- \mu_1)^t \Sigma^{-1} (x - \mu_1)  )}{\sqrt{(2 \pi)^p | \Sigma| }}
+ + \cdots + p_G \frac{\exp  ( - \frac{1}{2} (x- \mu_G)^t \Sigma^{-1} (x - \mu_G)  )}{\sqrt{(2 \pi)^p | \Sigma| }} \Big ]
+\end{aligned}
+$$
+where $|\Sigma|$ denotes the determinant of matrix $\Sigma$.
+
+2. Expression of the complete likelihood function $\sum_{i=1}^n  p(x_i, Z_i \mid p_{1:G}, \mu_{1:G}, \Sigma)$ or its log, which is the function we work with in the EM algorithm.
+
+$$
+\begin{aligned}
+& \prod_{i=1}^n  p(x_i, Z_i \mid p_{1:G}, \mu_{1:G}, \Sigma) \\
+= & \prod_{i=1}^n \prod_{k=1}^G   \Big [ p_k  \frac{\exp  ( - \frac{1}{2} (x- \mu_k)^t \Sigma^{-1} (x - \mu_k) )}{\sqrt{(2 \pi)^p | \Sigma| }} \Big ]^{\mathbb{1}_{\{Z_i = k \}}}
+\end{aligned}
+$$
+
+3. Expression of the distribution of $Z_i$ at the E-step. 
+
+    Given data and the current parameter value$(p_{1:G}^{(0)}, \mu_{1:G}^{(0)}, \Sigma^{(0)})$, $Z_i$ follows  a discrete distribute taking values from $1$ to $G$ with probabilities
+$$
+\begin{aligned}
+p_{ik} := & \mathbb{P}(Z_i = k \mid x_i, p_{1:G}^{(0)}, \mu_{1:G}^{(0)}, \Sigma^{(0)}) \\
+= & \text{ your expression}
+\end{aligned}
+$$
+
+4. Expression of the objective function you aim to maximize (or minimize) at the M-step.
+
+    At the M-step, we optimize the following objective function (where the expectation is taken over $Z_1, \dots, Z_n$ with respect to the probabilities computed at step 3): 
+    
+   
+\begin{aligned}
+g(p_{1:G}, \mu_{1:G}, \Sigma) = & \mathbb{E} \log \prod_{i=1}^n  p(x_i, Z_i \mid p_{1:G}, \mu_{1:G}, \Sigma) \\
+= & \mathbb{E} \sum_{i=1}^n \sum_{k=1}^G  \mathbb{1}_{\{Z_i = k \}} \log  \Big [ p_k  \frac{\exp  ( - \frac{1}{2} (x- \mu_k)^t \Sigma^{-1} (x - \mu_k) )}{\sqrt{(2 \pi)^p | \Sigma| }} \Big ] \\
+= & \sum_{i=1}^n \sum_{k=1}^G  p_{ik}  \log  \Big [ p_k  \frac{\exp  ( - \frac{1}{2} (x- \mu_k)^t \Sigma^{-1} (x - \mu_k) )}{\sqrt{(2 \pi)^p | \Sigma| }} \Big ]
+
+\end{aligned}
+
+
+where the last step is due to the fact that $\mathbb{E} [ \mathbb{1}_{\{Z_i = k \}}] = \mathbb{P}(Z_i = k) = p_{ik}.$
+
+5. Derivation and the updating formulas for $p_{1:G}, \mu_{1:G}, \Sigma$ at the M-step.
+
+
+
+### Part 2 
+
+
+
+
+
+
+

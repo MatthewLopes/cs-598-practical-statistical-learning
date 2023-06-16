@@ -1,0 +1,276 @@
+---
+title: "Coding2_Part2"
+output: html_document
+date: "2022-09-25"
+---
+
+```{r}
+library(glmnet) 
+library(pls)
+```
+
+## Case I
+
+```{r}
+myData = read.csv("./data/Coding2_Data2.csv", header = TRUE)
+student_ID = 1852
+```
+
+```{r}
+X = data.matrix(myData[,-1])  
+Y = myData[,1] 
+```
+
+```{r}
+T = 50
+n = length(Y)
+set.seed(student_ID)
+ntest = round(n * 0.25)  # test set size
+ntrain = n - ntest  # training set size
+all.test.id = matrix(0, ntest, T)  # 
+for(t in 1:T){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+#save(all.test.id, file="alltestID.RData")
+```
+
+## Full Model
+
+```{r}
+case1_fullmodel = c()
+for(i in 1:T){
+  test.id = all.test.id[, i] 
+  full.model = lm(Y ~ ., data = myData[-test.id, ])
+  Ytest.pred = predict(full.model, newdata = myData[test.id, ])
+  fullmodel_MSPE = mean((myData$Y[test.id] - Ytest.pred)^2)
+  
+  case1_fullmodel <- c(case1_fullmodel, fullmodel_MSPE)
+}
+  
+```
+
+
+## Ridge Regression
+
+```{r}
+case1_ridge_lam_min = c()
+case1_ridge_lam_1se = c()
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  mylasso.lambda.seq = exp(seq(-10, 1, length.out = 100))
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, 
+                     lambda = mylasso.lambda.seq)
+  
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  ridge1_lam_min_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case1_ridge_lam_min <- c(case1_ridge_lam_min, ridge1_lam_min_MSPE)
+  
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  ridge1_lam_1se_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case1_ridge_lam_1se <- c(case1_ridge_lam_1se, ridge1_lam_1se_MSPE)
+  
+}
+```
+
+
+## Lasso
+
+```{r}
+case1_lasso_min = c()
+case1_lasso_1se = c()
+case1_lasso_refit = c()
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1)
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  lasso_min_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case1_lasso_min <- c(case1_lasso_min, lasso_min_MSPE)
+  
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  lasso_1se_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case1_lasso_1se <- c(case1_lasso_1se, lasso_1se_MSPE)
+  
+  # Lasso refit
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  var.sel = row.names(mylasso.coef)[which(mylasso.coef != 0)[-1]]
+  mylasso.refit = lm(Y ~ ., myData[-test.id, c("Y", var.sel)])
+  Ytest.pred = predict(mylasso.refit, newdata = myData[test.id, ])
+  
+  lasso_refit_MSPE = mean((Ytest.pred - Y[test.id])^2)
+  case1_lasso_refit <- c(case1_lasso_refit, lasso_refit_MSPE)
+}
+
+```
+
+## PCR
+
+```{r}
+case1_PCR = c()
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  mypcr = pcr(Y ~ ., data= myData[-test.id, ], validation="CV", scale=TRUE)
+  CVerr = RMSEP(mypcr)$val[1, , ]
+  adjCVerr = RMSEP(mypcr)$val[2, , ]
+  best.ncomp = which.min(CVerr) - 1 
+  
+  if (best.ncomp==0) {
+      Ytest.pred = mean(myData$Y[-test.id])
+    } else {
+      Ytest.pred = predict(mypcr, myData[test.id,], ncomp=best.ncomp)
+    }
+  
+  case1_PCR_MSPE = mean((Ytest.pred - myData$Y[test.id])^2)
+  case1_PCR <- c(case1_PCR, case1_PCR_MSPE)
+}
+
+```
+
+## MSPE BoxPlot or StripChart
+
+```{r}
+boxplot_data <- data.frame( Full = case1_fullmodel,
+                            R_Min = case1_ridge_lam_min,
+                            R_1se = case1_ridge_lam_1se,
+                            L_Min = case1_lasso_min,
+                            L_1se = case1_lasso_1se,
+                            L_Refit = case1_lasso_refit,
+                            PCR = case1_PCR
+                          )
+boxplot(boxplot_data, main = "Case 1 Plots", ylab = "MSPE", xlab = "Model Type")
+```
+
+
+## Case 2
+
+```{r}
+library(glmnet) 
+library(pls)
+```
+
+```{r}
+myData2 = read.csv("./data/Coding2_Data3.csv", header = TRUE)
+student_ID = 1852
+```
+
+```{r}
+X = data.matrix(myData2[,-1])  
+Y = myData2[,1] 
+```
+
+```{r}
+T = 50
+n = length(Y)
+set.seed(student_ID)
+ntest = round(n * 0.25)  # test set size
+ntrain = n - ntest  # training set size
+all.test.id = matrix(0, ntest, T)  # 
+for(t in 1:T){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+#save(all.test.id, file="alltestID.RData")
+```
+
+## Ridge Regression
+
+```{r}
+case2_ridge_lam_min = c()
+case2_ridge_lam_1se = c()
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  mylasso.lambda.seq = exp(seq(-10, 1, length.out = 100))
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, 
+                     lambda = mylasso.lambda.seq)
+  
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  ridge2_lam_min_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case2_ridge_lam_min <- c(case2_ridge_lam_min, ridge2_lam_min_MSPE)
+  
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  ridge2_lam_1se_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case2_ridge_lam_1se <- c(case2_ridge_lam_1se, ridge2_lam_1se_MSPE)
+  
+}
+```
+
+
+## Lasso
+
+```{r}
+case2_lasso_min = c()
+case2_lasso_1se = c()
+case2_lasso_refit = c()
+
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1)
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  lasso2_min_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case2_lasso_min <- c(case2_lasso_min, lasso2_min_MSPE)
+  
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  
+  lasso2_1se_MSPE = mean((Y[test.id] - Ytest.pred)^2)
+  case2_lasso_1se <- c(case2_lasso_1se, lasso2_1se_MSPE)
+  
+  # Lasso refit
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  var.sel = row.names(mylasso.coef)[which(mylasso.coef != 0)[-1]]
+  mylasso.refit = lm(Y ~ ., myData2[-test.id, c("Y", var.sel)])
+  Ytest.pred = predict(mylasso.refit, newdata = myData2[test.id, ])
+  
+  lasso2_refit_MSPE = mean((Ytest.pred - Y[test.id])^2)
+  case2_lasso_refit <- c(case2_lasso_refit, lasso2_refit_MSPE)
+}
+
+```
+
+## PCR
+
+```{r}
+case2_PCR = c()
+for(i in 1:T){
+  test.id = all.test.id[, i]
+  mypcr = pcr(Y ~ ., data= myData2[-test.id, ], validation="CV", scale=TRUE)
+  CVerr = RMSEP(mypcr)$val[1, , ]
+  adjCVerr = RMSEP(mypcr)$val[2, , ]
+  best.ncomp = which.min(CVerr) - 1 
+  
+  if (best.ncomp==0) {
+      Ytest.pred = mean(myData2$Y[-test.id])
+    } else {
+      Ytest.pred = predict(mypcr, myData2[test.id,], ncomp=best.ncomp)
+    }
+  
+  case2_PCR_MSPE = mean((Ytest.pred - myData2$Y[test.id])^2)
+  case2_PCR <- c(case2_PCR, case2_PCR_MSPE)
+}
+
+```
+
+## MSPE BoxPlot or StripChart
+
+```{r}
+boxplot_data <- data.frame( R_Min = case2_ridge_lam_min,
+                            R_1se = case2_ridge_lam_1se,
+                            L_Min = case2_lasso_min,
+                            L_1se = case2_lasso_1se,
+                            L_Refit = case2_lasso_refit,
+                            PCR = case2_PCR
+                          )
+boxplot(boxplot_data, main = "Case 2 Plots", ylab = "MSPE", xlab = "Model Type")
+```

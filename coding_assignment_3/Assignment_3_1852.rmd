@@ -1,0 +1,408 @@
+---
+title: "Coding Assignment 3"
+output:
+  html_document:
+    df_print: paged
+---
+### Jack Kovach : jkovach2
+### Spencer Buja: cbuja2
+### Matthew Lopes: mlopes2
+### UIN Used: Kovach - 662871852
+
+```{r}
+library(splines)
+library(stats)
+library(ggplot2)
+library(ggpubr)
+library(caTools)
+options(digits = 7)
+```
+
+### Part I: Optimal Span for loess
+
+#### Prepare your function
+
+```{r}
+lo.lev <- function(x1, sp){
+  # x1: n-by-1 feature vector
+  # sp: a numerical value for "span"
+  
+  n = length(x1);
+  lev = rep(0, n)
+  
+  ##############################################
+  # YOUR CODE: Compute the diagonal entries of the 
+  #            smoother matrix S and 
+  #            store it in a vector "lev"
+  # Tip: check how we compute the smoother matrix
+  #      for smoothing spline models
+  ##############################################
+  
+  # return the smoother matrix with knots x and degree of freedom = sp
+  # this function is for x having unique values
+  n = length(x1);
+  A = matrix(0, n, n);
+  for(i in 1:n){
+       y = rep(0, n); y[i]=1;
+       lo_lev_model <- loess(y ~ x1, span=sp, control = loess.control(surface="direct"))
+       A[,i] = predict(lo_lev_model, x1)
+  }
+  lev = diag(A)
+  return(lev)
+}
+
+onestep_CV <- function(x1, y1, sp){
+  
+  ##############################################
+  #  YOUR CODE: 
+  #  1) Fit a loess model y1 ~ x1 with span = sp, and extract 
+  #     the corresponding residual vector
+  #  2) Call lo.lev to obtain the diagonal entries of S
+  #  3) Compute LOO-CV and GCV
+  ##############################################
+  
+  mod_loess <- loess(y1 ~ x1, span=sp, control = loess.control(surface = "direct"))
+  
+  loess_resids = residuals(mod_loess)
+  
+  lo_lev = lo.lev(x1, sp)
+  
+  n = length(lo_lev)
+
+  cv = (1/n)*sum(((loess_resids)/(1-lo_lev))^2)
+  gcv = (1/n)*sum(((loess_resids)/(1-(1/n)*(sum(lo_lev))))^2)
+ 
+  return(list(cv = cv, gcv = gcv))
+}
+
+
+myCV <- function(x1, y1, span){
+  
+  # x1: feature vector of length n
+  # y1: response vector of length n
+  # span: a sequence of values for "span"
+  
+  m = length(span)
+  cv = rep(0, m)
+  gcv = rep(0, m)
+  
+  for(i in 1:m){
+    tmp = onestep_CV(x1, y1, span[i])
+    cv[i] = tmp$cv
+    gcv[i] = tmp$gcv
+  }
+  return(list(cv = cv, gcv = gcv))
+}
+```
+
+#### Test your function
+
+```{r}
+coding3_data = read.csv("./data/Coding3_Data.csv", header = TRUE)
+dim(coding3_data)
+plot(coding3_data$x, coding3_data$y, xlab="", ylab="")
+```
+
+```{r}
+span1 = seq(from = 0.2, by = 0.05, length = 15 )
+cv.out = myCV(coding3_data$x, coding3_data$y, span1)
+print(cv.out)
+```
+
+#### Print out your results
+
+```{r}
+myout = data.frame(CV = cv.out$cv, 
+                   GCV = cv.out$gcv, 
+                   span = span1)
+myout$span[myout$GCV == min(myout$GCV)]
+myout$span[myout$CV == min(myout$CV)]
+myout
+```
+
+#### Plot the fitted curve
+
+```{r}
+spangcv.min = 0.5
+plot(coding3_data$x, coding3_data$y, xlab="", ylab="", col="gray");
+fx = 1:50/50;
+fy = sin(12*(fx+0.2))/(fx+0.2)
+lines(fx, fy, col=8, lwd=2);
+f = loess(y ~ x, coding3_data, span = spangcv.min)
+lines(fx, predict(f, data.frame(x = fx), surface = "direct"), 
+      lty=2, lwd=2, col="blue")
+```
+
+### Part II
+
+#### Remove Mean and Store Data as X
+```{r}
+set.seed(1852) 
+mydata = read.csv("./data/Sales_Transactions_Dataset_Weekly.csv")
+ts = as.matrix(mydata[, 2:53])
+row.names(ts) = mydata[,1]
+X = ts - rowMeans(ts)
+```
+
+#### Natural Cubic Spline with DF = 10 
+```{r}
+x=seq(0,1,length.out=ncol(X))
+
+F = ns(x, df=9, intercept = FALSE) 
+
+F = t(t(F) - colMeans(F))
+
+B_tp = solve(t(F)%*%F)%*%t(F)%*%t(X)
+
+B = t(B_tp)
+
+```
+
+#### Run the K Means
+
+```{r}
+km_B = kmeans(B, centers = 6)
+```
+
+#### Clutering with B
+
+```{r}
+clusters = km_B$cluster
+centers = km_B$centers
+
+par(mfrow=c(2,3))
+
+plot1 = 0
+plot2 = 0
+plot3 = 0
+plot4 = 0
+plot5 = 0
+plot6 = 0
+
+for (i in 1:6){
+  
+  cluster = which(clusters==i)
+  weekly_sales = matrix(0,52,length(cluster))
+  
+  for (j in 1:length(cluster)){
+    weekly_sales[,j] = X[j,]
+  }
+  
+  df = as.data.frame(weekly_sales)
+  
+  if(i==1){
+
+    plot1 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==2){
+
+    plot2 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==3){
+
+    plot3 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==4){
+
+    plot4 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==5){
+
+    plot5 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==6){
+
+    plot6 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(F%*%centers[i,], type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+}
+
+```
+
+#### Clutering with X
+
+```{r}
+km_X = kmeans(X, centers = 6)
+```
+
+```{r}
+clusters = km_X$cluster
+centers = km_X$centers
+
+par(mfrow=c(2,3))
+
+plot1 = 0
+plot2 = 0
+plot3 = 0
+plot4 = 0
+plot5 = 0
+plot6 = 0
+
+for (i in 1:6){
+  
+  cluster = which(clusters==i)
+  weekly_sales = matrix(0,52,length(cluster))
+  
+  for (j in 1:length(cluster)){
+    weekly_sales[,j] = X[j,]
+  }
+  
+  df = as.data.frame(weekly_sales)
+  
+  if(i==1){
+
+    plot1 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==2){
+
+    plot2 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==3){
+
+    plot3 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==4){
+
+    plot4 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==5){
+
+    plot5 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+  if(i==6){
+
+    plot6 = matplot(df, type = "l",col = "#B3B3B3",
+                    pch=20, xlab = "Weeks", ylab="Weekly Sales")
+    
+    matlines(rowMeans(df), type = "l", col = 2, lwd = 2, lty = 1)
+  }
+  
+}
+
+```
+
+### Part III Ridgeless and Double Descent
+
+```{r}
+set.seed(1852) 
+myData3 = read.csv("./data/Coding3_dataH.csv", header=FALSE)
+dim(myData3)
+```
+
+#### Ridgeless
+
+```{r}
+ridgeless = function(train, test, eps = 1e-10){
+  Xtrain = train[, -1]
+  Ytrain = train[, 1]
+  Xtest = test[, -1]
+  Ytest  = test[, 1]
+  
+  ##############################################
+  # Your code for computing Ytrain.hat and Ytest.hat
+  ##########################################
+  
+  Xtrain = t(t(Xtrain) - colMeans(Xtrain))
+  Xtest = t(t(Xtest) - colMeans(Xtrain))
+  
+  pca_train = prcomp(Xtrain, center = FALSE, scale = FALSE, tol = eps)
+
+  intercept_ = mean(Ytrain)
+  
+  F1_train = Xtrain%*%pca_train$rotation
+  
+  F1_test = Xtest%*%pca_train$rotation
+  
+  regression_train = t(F1_train) %*% Ytrain/colSums(F1_train ^ 2)
+  
+  Ytrain.hat = F1_train%*%regression_train + intercept_
+  Ytest.hat = F1_test%*%regression_train + intercept_
+  
+  return(list(
+    train.err = mean((Ytrain - Ytrain.hat)^2), 
+    test.err = mean ((Ytest - Ytest.hat)^2)
+  ))
+}
+```
+
+#### Simulation Study
+
+```{r}
+
+T = 30
+n = 506 # from the mydata3
+ntest = round(n * 0.75)  # test set size
+ntrain = n - ntest  # training set size
+num_sim_iters = T
+all.test.id = matrix(0, ntest, num_sim_iters)
+test_errs = matrix(0,T,236)
+
+log_meds = c()
+
+  
+for(t in 1:num_sim_iters){
+  
+  test.id = sample(1:n, ntest)
+  train = as.matrix(myData3[-test.id,])
+  test = as.matrix(myData3[test.id,])
+  
+  for (d in 6:241){
+    train_subset = train[,1:d]
+    test_subset = test[,1:d]
+    model = ridgeless(train_subset,test_subset)
+    test_errs[t,d-5] = model$test.err
+  }
+
+}
+
+for (d in 6:241){
+  log_med_curr = log(median(test_errs[,d-5]))
+  log_meds = c(log_meds, log_med_curr)
+}
+
+plot(6:241,log_meds)
+
+```
